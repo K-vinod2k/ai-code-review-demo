@@ -62,7 +62,20 @@ jobs:
             -f json > review.json
           cat review.json
 
+      # Runs even when the review step failed, so a failure is reported on the
+      # pull request rather than only in the Actions log where nobody looks.
+      - name: Post the review onto the pull request
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          pip install --quiet requests
+          python3 .github/scripts/post_review.py review.json \
+            --pr ${{ github.event.pull_request.number }}
+
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: ai-review
           path: review.json
