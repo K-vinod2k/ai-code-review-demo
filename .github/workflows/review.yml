@@ -33,15 +33,24 @@ jobs:
           # Both timeouts are load-bearing. The 300s HTTP default silently
           # truncates a run and reports success on a partial review.
           OCR_LLM_TIMEOUT: "900"
-          OCR_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          # All three are required. OCR_API_KEY alone does nothing: the
+          # reviewer exits with "no valid LLM endpoint configured" and, if the
+          # step swallows that, the job goes green having reviewed nothing.
+          OCR_LLM_URL: https://integrate.api.nvidia.com/v1
+          OCR_LLM_TOKEN: ${{ secrets.NVIDIA_API_KEY }}
+          OCR_LLM_MODEL: nvidia/nemotron-3-super-120b-a12b
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # No `|| true` here. A reviewer that failed to run must not look like a
+        # reviewer that found nothing. The job-level continue-on-error above is
+        # what keeps this advisory; swallowing the exit code here would instead
+        # hide the failure, which is the exact defect this workflow reviews for.
         run: |
           ocr review \
             --from origin/${{ github.base_ref }} \
             --to ${{ github.event.pull_request.head.sha }} \
             --timeout 45 \
             --audience agent \
-            -f json > review.json || true
+            -f json > review.json
           cat review.json
 
       - uses: actions/upload-artifact@v4
