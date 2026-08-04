@@ -1,0 +1,50 @@
+name: AI Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  # Advisory only. This job must never block a merge.
+  #
+  # The reviewer was measured against a labelled set of 15 known violations:
+  # recall ranged 26.7% to 80% across three identical runs, with 8 findings
+  # appearing in some runs and not others. That is useful as a second opinion
+  # and unacceptable as a gate, so continue-on-error is load-bearing here.
+  # Do not remove it.
+  ai-review:
+    name: AI review (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install reviewer
+        run: curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh | sh
+
+      - name: Review the pull request
+        env:
+          # Both timeouts are load-bearing. The 300s HTTP default silently
+          # truncates a run and reports success on a partial review.
+          OCR_LLM_TIMEOUT: "900"
+          OCR_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ocr review \
+            --from origin/${{ github.base_ref }} \
+            --to ${{ github.event.pull_request.head.sha }} \
+            --timeout 45 \
+            --audience agent \
+            -f json > review.json || true
+          cat review.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ai-review
+          path: review.json
