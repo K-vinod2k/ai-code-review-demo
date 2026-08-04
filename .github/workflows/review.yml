@@ -28,17 +28,26 @@ jobs:
       - name: Install reviewer
         run: curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh | sh
 
+      # Mirrors the provider config known to work locally, rather than relying
+      # on the OCR_LLM_* environment variables. Those got past the endpoint
+      # check but every file review still failed instantly (0 tokens, 0 tool
+      # calls, 0s elapsed), because the custom provider also needs its protocol
+      # declared. `ocr config set` is the same path the local setup uses.
+      - name: Configure reviewer
+        env:
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+        run: |
+          ocr config set provider nvidia-nim
+          ocr config set custom_providers.nvidia-nim.url https://integrate.api.nvidia.com/v1
+          ocr config set custom_providers.nvidia-nim.protocol openai
+          ocr config set custom_providers.nvidia-nim.model nvidia/nemotron-3-super-120b-a12b
+          ocr config set custom_providers.nvidia-nim.api_key "$NVIDIA_API_KEY"
+
       - name: Review the pull request
         env:
           # Both timeouts are load-bearing. The 300s HTTP default silently
           # truncates a run and reports success on a partial review.
           OCR_LLM_TIMEOUT: "900"
-          # All three are required. OCR_API_KEY alone does nothing: the
-          # reviewer exits with "no valid LLM endpoint configured" and, if the
-          # step swallows that, the job goes green having reviewed nothing.
-          OCR_LLM_URL: https://integrate.api.nvidia.com/v1
-          OCR_LLM_TOKEN: ${{ secrets.NVIDIA_API_KEY }}
-          OCR_LLM_MODEL: nvidia/nemotron-3-super-120b-a12b
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         # No `|| true` here. A reviewer that failed to run must not look like a
         # reviewer that found nothing. The job-level continue-on-error above is
