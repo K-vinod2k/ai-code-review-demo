@@ -28,23 +28,54 @@ jobs:
       - name: Install reviewer
         run: curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh | sh
 
+      # Mirrors the provider config known to work locally, rather than relying
+      # on the OCR_LLM_* environment variables. Those got past the endpoint
+      # check but every file review still failed instantly (0 tokens, 0 tool
+      # calls, 0s elapsed), because the custom provider also needs its protocol
+      # declared. `ocr config set` is the same path the local setup uses.
+      - name: Configure reviewer
+        env:
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+        run: |
+          ocr config set provider nvidia-nim
+          ocr config set custom_providers.nvidia-nim.url https://integrate.api.nvidia.com/v1
+          ocr config set custom_providers.nvidia-nim.protocol openai
+          ocr config set custom_providers.nvidia-nim.model nvidia/nemotron-3-super-120b-a12b
+          ocr config set custom_providers.nvidia-nim.api_key "$NVIDIA_API_KEY"
+
       - name: Review the pull request
         env:
           # Both timeouts are load-bearing. The 300s HTTP default silently
           # truncates a run and reports success on a partial review.
           OCR_LLM_TIMEOUT: "900"
-          OCR_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # No `|| true` here. A reviewer that failed to run must not look like a
+        # reviewer that found nothing. The job-level continue-on-error above is
+        # what keeps this advisory; swallowing the exit code here would instead
+        # hide the failure, which is the exact defect this workflow reviews for.
         run: |
           ocr review \
             --from origin/${{ github.base_ref }} \
             --to ${{ github.event.pull_request.head.sha }} \
             --timeout 45 \
             --audience agent \
-            -f json > review.json || true
+            -f json > review.json
           cat review.json
 
+      # Runs even when the review step failed, so a failure is reported on the
+      # pull request rather than only in the Actions log where nobody looks.
+      - name: Post the review onto the pull request
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          pip install --quiet requests
+          python3 .github/scripts/post_review.py review.json \
+            --pr ${{ github.event.pull_request.number }}
+
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: ai-review
           path: review.json
